@@ -1,27 +1,72 @@
 // netlify/functions/generateResume.js
 
-exports.handler = async (event) => {
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+exports.handler = async function (event) {
   try {
+    // Handles browser preflight request
+    if (event.httpMethod === "OPTIONS") {
+      return {
+        statusCode: 204,
+        headers: corsHeaders,
+        body: "",
+      };
+    }
+
     if (event.httpMethod !== "POST") {
       return {
         statusCode: 405,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Method not allowed" }),
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Method not allowed. Use POST.",
+        }),
       };
     }
 
-    const { prompt } = JSON.parse(event.body || "{}");
+    let body;
+
+    try {
+      body = JSON.parse(event.body || "{}");
+    } catch (parseError) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Invalid JSON sent to the resume function.",
+        }),
+      };
+    }
+
+    const prompt = body.prompt;
+
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Missing resume prompt.",
+        }),
+      };
+    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
+
     if (!apiKey) {
       return {
         statusCode: 500,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Missing ANTHROPIC_API_KEY" }),
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Missing ANTHROPIC_API_KEY in Netlify environment variables.",
+        }),
       };
     }
 
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
+    const anthropicResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -29,37 +74,77 @@ exports.handler = async (event) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 1100,
-        temperature: 0.5,
-        messages: [{ role: "user", content: prompt }],
+        model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20240620",
+        max_tokens: 1800,
+        temperature: 0.4,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
       }),
     });
 
-    const data = await r.json();
+    let data;
 
-    if (!r.ok) {
+    try {
+      data = await anthropicResponse.json();
+    } catch (jsonError) {
       return {
-        statusCode: r.status,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: data?.error?.message || "Anthropic API error" }),
+        statusCode: 502,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Anthropic returned an invalid response.",
+        }),
+      };
+    }
+
+    if (!anthropicResponse.ok) {
+      return {
+        statusCode: anthropicResponse.status,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error:
+            data?.error?.message ||
+            data?.message ||
+            "Anthropic API error. Check your API key, billing, or model access.",
+        }),
       };
     }
 
     const resumeText = Array.isArray(data?.content)
-      ? data.content.filter(b => b?.type === "text").map(b => b.text).join("\n")
+      ? data.content
+          .filter((block) => block?.type === "text")
+          .map((block) => block.text)
+          .join("\n")
+          .trim()
       : "";
+
+    if (!resumeText) {
+      return {
+        statusCode: 502,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "No resume text was returned from Anthropic.",
+        }),
+      };
+    }
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resumeText }),
+      headers: corsHeaders,
+      body: JSON.stringify({
+        resumeText,
+      }),
     };
-  } catch (e) {
+  } catch (error) {
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: e?.message || "Server error" }),
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: error?.message || "Server error inside generateResume function.",
+      }),
     };
   }
 };
