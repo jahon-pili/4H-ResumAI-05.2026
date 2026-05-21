@@ -9,7 +9,6 @@ const corsHeaders = {
 
 exports.handler = async function (event) {
   try {
-    // Handles browser preflight request
     if (event.httpMethod === "OPTIONS") {
       return {
         statusCode: 204,
@@ -28,28 +27,28 @@ exports.handler = async function (event) {
       };
     }
 
-    let body;
+    let requestBody = {};
 
     try {
-      body = JSON.parse(event.body || "{}");
-    } catch (parseError) {
+      requestBody = JSON.parse(event.body || "{}");
+    } catch (error) {
       return {
         statusCode: 400,
         headers: corsHeaders,
         body: JSON.stringify({
-          error: "Invalid JSON sent to the resume function.",
+          error: "Invalid JSON sent to generateResume.",
         }),
       };
     }
 
-    const prompt = body.prompt;
+    const prompt = requestBody.prompt;
 
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
+    if (!prompt || typeof prompt !== "string") {
       return {
         statusCode: 400,
         headers: corsHeaders,
         body: JSON.stringify({
-          error: "Missing resume prompt.",
+          error: "Missing prompt.",
         }),
       };
     }
@@ -66,7 +65,7 @@ exports.handler = async function (event) {
       };
     }
 
-    const anthropicResponse = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -74,7 +73,7 @@ exports.handler = async function (event) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20240620",
+        model: "claude-sonnet-4-6",
         max_tokens: 1800,
         temperature: 0.4,
         messages: [
@@ -86,23 +85,11 @@ exports.handler = async function (event) {
       }),
     });
 
-    let data;
+    const data = await response.json();
 
-    try {
-      data = await anthropicResponse.json();
-    } catch (jsonError) {
+    if (!response.ok) {
       return {
-        statusCode: 502,
-        headers: corsHeaders,
-        body: JSON.stringify({
-          error: "Anthropic returned an invalid response.",
-        }),
-      };
-    }
-
-    if (!anthropicResponse.ok) {
-      return {
-        statusCode: anthropicResponse.status,
+        statusCode: response.status,
         headers: corsHeaders,
         body: JSON.stringify({
           error:
@@ -126,7 +113,7 @@ exports.handler = async function (event) {
         statusCode: 502,
         headers: corsHeaders,
         body: JSON.stringify({
-          error: "No resume text was returned from Anthropic.",
+          error: "Anthropic returned no resume text.",
         }),
       };
     }
@@ -143,7 +130,7 @@ exports.handler = async function (event) {
       statusCode: 500,
       headers: corsHeaders,
       body: JSON.stringify({
-        error: error?.message || "Server error inside generateResume function.",
+        error: error?.message || "Server error inside generateResume.",
       }),
     };
   }
