@@ -453,7 +453,7 @@
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn-next" onclick="go(2)">Next →</button>
+      <button type="button" class="btn-next" onclick="go(2)">Next →</button>
     </div>
   </div>
 
@@ -480,8 +480,8 @@
       <textarea id="homeResp" placeholder="e.g., Help care for younger siblings, manage household chores, care for animals/garden, help with family business..."></textarea>
     </div>
     <div class="btn-row">
-      <button class="btn-back" onclick="go(1)">← Back</button>
-      <button class="btn-next" onclick="go(3)">Next →</button>
+      <button type="button" class="btn-back" onclick="go(1)">← Back</button>
+      <button type="button" class="btn-next" onclick="go(3)">Next →</button>
     </div>
   </div>
 
@@ -531,8 +531,8 @@
       <input type="text" id="otherSkills" placeholder="e.g., Speak Spanish, know how to weld, great at math..." />
     </div>
     <div class="btn-row">
-      <button class="btn-back" onclick="go(2)">← Back</button>
-      <button class="btn-next" onclick="go(4)">Next →</button>
+      <button type="button" class="btn-back" onclick="go(2)">← Back</button>
+      <button type="button" class="btn-next" onclick="go(4)">Next →</button>
     </div>
   </div>
 
@@ -562,8 +562,8 @@
       <textarea id="motto" placeholder="The 4-H motto — what does it mean in your own life? How do you live it out?"></textarea>
     </div>
     <div class="btn-row">
-      <button class="btn-back" onclick="go(3)">← Back</button>
-      <button class="btn-next" onclick="go(5)">Next →</button>
+      <button type="button" class="btn-back" onclick="go(3)">← Back</button>
+      <button type="button" class="btn-next" onclick="go(5)">Next →</button>
     </div>
   </div>
 
@@ -602,8 +602,8 @@
       </select>
     </div>
     <div class="btn-row">
-      <button class="btn-back" onclick="go(4)">← Back</button>
-      <button class="btn-submit" onclick="submitForm()">✨ Build My Resume</button>
+      <button type="button" class="btn-back" onclick="go(4)">← Back</button>
+      <button type="button" class="btn-submit" onclick="submitForm()">✨ Build My Resume</button>
     </div>
   </div>
 
@@ -618,8 +618,7 @@
   <div class="success-screen" id="successScreen">
     <span class="success-icon">🎉</span>
     <h2>Your resume is ready!</h2>
-    <p>We've sent a copy to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
-    <p style="font-size: 13px; margin-top: -10px;">Don't see it? Check your spam folder.</p>
+    <p>Your Word document should download automatically. You can also use the download area below if needed.</p>
 
     <div style="margin: 28px auto; max-width: 360px; background: #1a1a1a; border: 1px solid #339966; border-radius: 12px; padding: 24px 20px; text-align: center;">
       <p style="font-size: 14px; font-weight: 600; color: #339966; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">💾 Your Word Doc</p>
@@ -628,7 +627,7 @@
       </div>
     </div>
 
-    <button class="restart-btn" onclick="restart()">Build another resume →</button>
+    <button type="button" class="restart-btn" onclick="restart()">Build another resume →</button>
   </div>
 
 </div><!-- /container -->
@@ -644,26 +643,45 @@
 
 
   function go(n) {
-    // Validate section 1
+    // Validate section 1 before moving forward
     if (currentSection === 1 && n > 1) {
       const first = document.getElementById('firstName').value.trim();
       const last = document.getElementById('lastName').value.trim();
       const em = document.getElementById('email').value.trim();
       const errEl = document.getElementById('emailError');
-      if (!first || !last || !em) { alert('Please fill in your name and email before continuing.'); return; }
+
+      if (!first || !last || !em) {
+        alert('Please fill in your name and email before continuing.');
+        return;
+      }
+
       const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
-      if (!emailOk) { errEl.style.display = 'block'; return; }
+      if (!emailOk) {
+        errEl.style.display = 'block';
+        return;
+      }
+
       errEl.style.display = 'none';
     }
 
-    document.getElementById('s' + currentSection).classList.remove('active');
-    document.getElementById('dot-' + currentSection).classList.remove('active');
-    document.getElementById('dot-' + currentSection).classList.add('done');
+    // Swap visible section
+    const currentEl = document.getElementById('s' + currentSection);
+    const nextEl = document.getElementById('s' + n);
+
+    if (currentEl) currentEl.classList.remove('active');
+    if (nextEl) nextEl.classList.add('active');
 
     currentSection = n;
-    document.getElementById('s' + n).classList.add('active');
-    document.getElementById('dot-' + n).classList.remove('done');
-    document.getElementById('dot-' + n).classList.add('active');
+
+    // Rebuild progress dots so Back/Next always looks correct
+    for (let i = 1; i <= 5; i++) {
+      const dot = document.getElementById('dot-' + i);
+      if (!dot) continue;
+      dot.classList.remove('active', 'done');
+      if (i < currentSection) dot.classList.add('done');
+      if (i === currentSection) dot.classList.add('active');
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -707,9 +725,8 @@
       downloadDocx(docxBlob, `${data.name || "resume"}_4H_Resume.docx`);
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
-      document.getElementById('successEmail').textContent = "";
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">Your resume is ready. Use the Download button below.</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">Your resume has downloaded as a Word document.</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
@@ -846,19 +863,6 @@ Write the complete resume now:`;
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
   }
-
-    });
-    if (!response.ok) throw new Error('File upload failed');
-    const result = await response.json();
-    return result.url;
-  }
-
-      );
-
-    if (result.status !== 200) throw new Error('Email failed to send');
-    return result;
-  }
-
 
   function generateDocxAndQR(d, resumeText) {
     try {
