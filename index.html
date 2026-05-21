@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>4-H Resume Builder</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <style>
@@ -381,14 +380,11 @@
 </head>
 <body>
 
-<!-- ⚙️ CONFIGURATION — Edit these values before using -->
+<!-- ⚙️ CONFIGURATION (NO SECRETS IN REPO) -->
 <script>
   const CONFIG = {
-    OPENAI_API_KEY: "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",
-    EMAILJS_PUBLIC_KEY: "jKAF1oOwBajtMdLIL",
-    EMAILJS_SERVICE_ID: "service_uolbdhi",
-    EMAILJS_TEMPLATE_ID: "template_1h7n0zg",
-    FILESTACK_API_KEY: "ALB7TrrnSAOmbmA3QjzIUz"
+    // All secrets must be stored in Netlify Environment Variables, not here.
+    // This front-end calls the Netlify Function at /.netlify/functions/generateResume
   };
 </script>
 
@@ -643,8 +639,7 @@
   let currentSection = 1;
 
   window.addEventListener('DOMContentLoaded', () => {
-    emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
-  });
+    });
 
 
 
@@ -709,17 +704,16 @@
     try {
       const resume = await generateResume(data);
       const docxBlob = await buildDocxBlob(data, resume);
-      const fileUrl = await uploadToFilestack(docxBlob, data.name);
-      await sendEmail(data, resume, fileUrl);
+      downloadDocx(docxBlob, `${data.name || "resume"}_4H_Resume.docx`);
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
-      document.getElementById('successEmail').textContent = data.email;
+      document.getElementById('successEmail').textContent = "";
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">A download link has been sent to your email. Open it on your phone to get your Word doc.</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">Your resume is ready. Use the Download button below.</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
-      alert('Something went wrong: ' + err.message + '\n\nPlease check your API keys in the CONFIG section and try again.');
+      alert('Something went wrong: ' + err.message + '\n\nPlease try again. (If this keeps happening, check the Netlify Function logs.)');
     }
   }
 
@@ -765,23 +759,23 @@ INSTRUCTIONS:
 
 Write the complete resume now:`;
 
-    const response = await fetch("https://jahon-4h.jahon.workers.dev", {
+    const response = await fetch("/.netlify/functions/generateResume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        max_tokens: 1200,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify({ prompt })
     });
 
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || 'Resume generation failed. Please try again.');
+      let errText = "Resume generation failed. Please try again.";
+      try {
+        const err = await response.json();
+        errText = err.error || err.message || errText;
+      } catch {}
+      throw new Error(errText);
     }
 
     const result = await response.json();
-    return result.choices[0].message.content;
+    return result.resumeText || result.text || result.output || "";
   }
 
   async function buildDocxBlob(d, resumeText) {
@@ -842,36 +836,24 @@ Write the complete resume now:`;
     return blob;
   }
 
-  async function uploadToFilestack(blob, studentName) {
-    const filename = studentName.replace(/ /g, '_') + '_Resume.docx';
-    const formData = new FormData();
-    formData.append('fileUpload', blob, filename);
-    const response = await fetch('https://www.filestackapi.com/api/store/S3?key=' + CONFIG.FILESTACK_API_KEY + '&filename=' + encodeURIComponent(filename), {
-      method: 'POST',
-      body: blob,
-      headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      }
+  function downloadDocx(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }
+
     });
     if (!response.ok) throw new Error('File upload failed');
     const result = await response.json();
     return result.url;
   }
 
-  async function sendEmail(d, resumeText, fileUrl) {
-    const result = await emailjs.send(
-      CONFIG.EMAILJS_SERVICE_ID,
-      CONFIG.EMAILJS_TEMPLATE_ID,
-      {
-        to_email: d.email,
-        to_name: d.name.split(' ')[0],
-        full_name: d.name,
-        resume_content: resumeText,
-        school: d.school,
-        grade: d.grade,
-        download_link: fileUrl || 'Not available'
-      }
-    );
+      );
 
     if (result.status !== 200) throw new Error('Email failed to send');
     return result;
