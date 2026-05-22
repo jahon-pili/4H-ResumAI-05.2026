@@ -1,9 +1,9 @@
 // netlify/functions/generateResume.js
-// Robust Anthropic call with retry/backoff for "Overloaded" / 429 / 503 / 529
+// Anthropic Claude API call with retry/backoff for overload/rate-limit.
+// Model updated: use env var ANTHROPIC_MODEL or default to "claude-sonnet-4-6".
 
 exports.handler = async (event) => {
   try {
-    // Only allow POST
     if (event.httpMethod !== "POST") {
       return {
         statusCode: 405,
@@ -21,9 +21,7 @@ exports.handler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const prompt = body.prompt;
-
+    const { prompt } = JSON.parse(event.body || "{}");
     if (!prompt || typeof prompt !== "string") {
       return {
         statusCode: 400,
@@ -34,7 +32,9 @@ exports.handler = async (event) => {
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
     const maxAttempts = 5;
+
     let lastStatus = 500;
     let lastMsg = "Unknown error";
     let data = null;
@@ -48,7 +48,7 @@ exports.handler = async (event) => {
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-3-5-sonnet-20240620",
+          model,
           max_tokens: 1100,
           temperature: 0.5,
           messages: [{ role: "user", content: prompt }],
@@ -57,7 +57,6 @@ exports.handler = async (event) => {
 
       lastStatus = r.status;
 
-      // Read text first (Anthropic should return JSON, but this prevents JSON parse crashes)
       const raw = await r.text();
       try {
         data = JSON.parse(raw);
@@ -66,7 +65,6 @@ exports.handler = async (event) => {
       }
 
       if (r.ok) {
-        // Success: extract resume text
         const resumeText = Array.isArray(data?.content)
           ? data.content
               .filter((b) => b?.type === "text")
@@ -92,7 +90,6 @@ exports.handler = async (event) => {
         };
       }
 
-      // Not OK: decide whether to retry
       const msg =
         data?.error?.message ||
         data?.message ||
@@ -104,7 +101,7 @@ exports.handler = async (event) => {
       const retryable =
         r.status === 429 || // rate limit
         r.status === 503 || // service unavailable
-        r.status === 529 || // overloaded (seen in practice)
+        r.status === 529 || // overloaded
         /overload|overloaded|temporarily|try again|busy/i.test(String(msg));
 
       if (!retryable || attempt === maxAttempts) {
@@ -115,13 +112,11 @@ exports.handler = async (event) => {
         };
       }
 
-      // Exponential backoff + jitter
       const backoff =
         Math.min(9000, 600 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 300);
       await sleep(backoff);
     }
 
-    // Shouldn’t reach here, but just in case:
     return {
       statusCode: lastStatus,
       headers: { "Content-Type": "application/json" },
