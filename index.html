@@ -641,18 +641,33 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
 <script>
   let currentSection = 1;
 
   window.addEventListener('DOMContentLoaded', () => {
-    if (CONFIG.EMAILJS_PUBLIC_KEY) {
-      emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
-    }
+    if (!CONFIG.EMAILJS_PUBLIC_KEY) return;
+
+    const tryInit = () => {
+      if (window.emailjs && typeof window.emailjs.init === 'function') {
+        window.emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
+        return true;
+      }
+      return false;
+    };
+
+    if (tryInit()) return;
+
+    // If the CDN script is still loading, poll briefly.
+    let tries = 0;
+    const t = setInterval(() => {
+      tries += 1;
+      if (tryInit() || tries > 50) clearInterval(t);
+    }, 100);
   });
 
-
-
-  function go(n) {
+function go(n) {
     // Validate section 1 before moving forward
     if (currentSection === 1 && n > 1) {
       const first = document.getElementById('firstName').value.trim();
@@ -730,26 +745,37 @@
     if (!CONFIG.EMAILJS_PUBLIC_KEY || !CONFIG.EMAILJS_SERVICE_ID || !CONFIG.EMAILJS_TEMPLATE_ID) {
       throw new Error("EmailJS is not configured. Add your EmailJS keys in the CONFIG section.");
     }
+    if (!window.emailjs || typeof window.emailjs.send !== "function") {
+      throw new Error("EmailJS library failed to load (emailjs is not defined). Make sure the EmailJS CDN script is included.");
+    }
 
-    const attachmentBase64 = await blobToBase64(docxBlob);
+    // 1) Convert DOCX -> base64 (no data: prefix)
+    const docxBase64 = await blobToBase64(docxBlob);
     const filename = `${safeFileName(data.name)}_4H_Resume.docx`;
 
-    // IMPORTANT (EmailJS template):
-    // 1) Create a template in EmailJS with these variables:
-    //    to_email, to_name, resume_html (or resume_text), attachment, attachment_name
-    // 2) In the template editor, add an attachment and map it to {{attachment}} (base64),
-    //    and set the filename using {{attachment_name}} if your plan supports it.
+    // 2) Upload DOCX to Filestack via Netlify Function (keeps Filestack key off the browser)
+    const upResp = await fetch("/.netlify/functions/uploadDocx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, docxBase64 })
+    });
+
+    const upData = await upResp.json().catch(() => ({}));
+    if (!upResp.ok || !upData.url) {
+      throw new Error(upData.error || "Could not upload the Word doc.");
+    }
+
+    // 3) Send the email (NO attachment; just the link)
     const params = {
       to_email: data.email,
       to_name: data.name,
+      resume_content: resumeText, // matches your EmailJS template variable {{resume_content}}
+      resume_link: upData.url,    // matches your EmailJS link variable {{resume_link}}
       resume_html: escapeHtml(resumeText).replace(/\n/g, "<br>"),
-      resume_text: resumeText,
-      attachment: attachmentBase64,
-      attachment_name: filename,
       from_email: CONFIG.RESUME_FROM_EMAIL || ""
     };
 
-    return emailjs.send(CONFIG.EMAILJS_SERVICE_ID, CONFIG.EMAILJS_TEMPLATE_ID, params);
+    return window.emailjs.send(CONFIG.EMAILJS_SERVICE_ID, CONFIG.EMAILJS_TEMPLATE_ID, params);
   }
 
 
