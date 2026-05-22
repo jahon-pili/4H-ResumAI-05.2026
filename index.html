@@ -624,7 +624,7 @@
   <div class="success-screen" id="successScreen">
     <span class="success-icon">🎉</span>
     <h2>Your resume is ready!</h2>
-    <p>We emailed a Word document to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
+    <p>We emailed your resume to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
     <p style="font-size: 13px; margin-top: -10px;">Don't see it? Check your spam folder.</p>
 
     <div style="margin: 28px auto; max-width: 360px; background: #1a1a1a; border: 1px solid #339966; border-radius: 12px; padding: 24px 20px; text-align: center;">
@@ -726,34 +726,69 @@
       .replace(/\s+/g, "_");
   }
 
-  async function sendResumeEmailViaEmailJS(data, resumeText, docxBlob) {
+  
+  async function sendResumeEmailViaEmailJS(data, resumeText, resumeLink) {
     if (!CONFIG.EMAILJS_PUBLIC_KEY || !CONFIG.EMAILJS_SERVICE_ID || !CONFIG.EMAILJS_TEMPLATE_ID) {
       throw new Error("EmailJS is not configured. Add your EmailJS keys in the CONFIG section.");
     }
 
-    const attachmentBase64 = await blobToBase64(docxBlob);
-    const filename = `${safeFileName(data.name)}_4H_Resume.docx`;
-
-    // IMPORTANT (EmailJS template):
-    // 1) Create a template in EmailJS with these variables:
-    //    to_email, to_name, resume_html (or resume_text), attachment, attachment_name
-    // 2) In the template editor, add an attachment and map it to {{attachment}} (base64),
-    //    and set the filename using {{attachment_name}} if your plan supports it.
+    // EmailJS template variables expected:
+    // to_email, to_name, resume_content (or resume_html), resume_link
     const params = {
       to_email: data.email,
       to_name: data.name,
+      resume_content: resumeText,
       resume_html: escapeHtml(resumeText).replace(/\n/g, "<br>"),
-      resume_text: resumeText,
-      attachment: attachmentBase64,
-      attachment_name: filename,
+      resume_link: resumeLink,
       from_email: CONFIG.RESUME_FROM_EMAIL || ""
     };
 
     return emailjs.send(CONFIG.EMAILJS_SERVICE_ID, CONFIG.EMAILJS_TEMPLATE_ID, params);
   }
 
+  async function uploadDocxAndGetLink(filename, docxBlob) {
+    const base64 = await blobToBase64(docxBlob);
+    const res = await fetch("/.netlify/functions/uploadDocx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename,
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        base64
+      })
+    });
 
-  async function submitForm() {
+    if (!res.ok) {
+      let msg = "Upload failed";
+      try {
+        const j = await res.json();
+        msg = j.error || j.message || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const out = await res.json();
+    const url = out.url || out.downloadUrl || out.fileUrl;
+    if (!url) throw new Error("Upload succeeded but no URL was returned.");
+    return url;
+  }
+
+  
+  function renderDownloadLink(url) {
+    const el = document.getElementById("downloadArea");
+    if (!el) return;
+    el.innerHTML = `
+      <a href="${url}" target="_blank" rel="noopener" style="display:inline-block;background:#339966;color:white;padding:12px 16px;border-radius:10px;font-weight:700;text-decoration:none;">
+        Download your Word resume
+      </a>
+      <p style="font-size:12px;color:#a0a0a0;line-height:1.5;margin-top:10px;">
+        If the link doesn't open, copy/paste it into a browser.
+      </p>
+      <p style="font-size:12px;color:#a0a0a0;word-break:break-all;">${url}</p>
+    `;
+  }
+
+async function submitForm() {
     // Show loading
     document.getElementById('s5').classList.remove('active');
     document.getElementById('loadingScreen').classList.add('active');
@@ -786,15 +821,21 @@
       const resumeText = await generateResume(data);
       const docxBlob = await buildDocxBlob(data, resumeText);
 
-      // ✅ Email the Word doc (no download)
-      await sendResumeEmailViaEmailJS(data, resumeText, docxBlob);
+      // 1) Upload the Word doc and get a public download link
+      const filename = `${safeFileName(data.name)}_4H_Resume.docx`;
+      const resumeLink = await uploadDocxAndGetLink(filename, docxBlob);
 
-      document.getElementById('loadingScreen').classList.remove('active');
+      // 2) Email the resume (rich text) + the download link
+      await sendResumeEmailViaEmailJS(data, resumeText, resumeLink);
+
+      // 3) Also show the link on-screen (optional)
+      renderDownloadLink(resumeLink);
+document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
       const emailEl = document.getElementById('successEmail');
       if (emailEl) emailEl.textContent = data.email;
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume (Word doc attached).</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume and a download link.</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
