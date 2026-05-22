@@ -383,8 +383,14 @@
 <!-- ⚙️ CONFIGURATION (NO SECRETS IN REPO) -->
 <script>
   const CONFIG = {
-    // All secrets must be stored in Netlify Environment Variables, not here.
-    // This front-end calls the Netlify Function at /.netlify/functions/generateResume
+    // ✅ EmailJS is client-side, so these IDs are OK to keep in the front-end.
+    // Get these from EmailJS: https://www.emailjs.com/
+    EMAILJS_PUBLIC_KEY: "REPLACE_WITH_YOUR_EMAILJS_PUBLIC_KEY",
+    EMAILJS_SERVICE_ID: "REPLACE_WITH_YOUR_EMAILJS_SERVICE_ID",
+    EMAILJS_TEMPLATE_ID: "REPLACE_WITH_YOUR_EMAILJS_TEMPLATE_ID",
+
+    // Optional: what you want the "from" email to look like inside the email body/template.
+    RESUME_FROM_EMAIL: "jahon@jmp-creative.com"
   };
 </script>
 
@@ -618,12 +624,13 @@
   <div class="success-screen" id="successScreen">
     <span class="success-icon">🎉</span>
     <h2>Your resume is ready!</h2>
-    <p>Your Word document should download automatically. You can also use the download area below if needed.</p>
+    <p>We emailed a Word document to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
+    <p style="font-size: 13px; margin-top: -10px;">Don't see it? Check your spam folder.</p>
 
     <div style="margin: 28px auto; max-width: 360px; background: #1a1a1a; border: 1px solid #339966; border-radius: 12px; padding: 24px 20px; text-align: center;">
-      <p style="font-size: 14px; font-weight: 600; color: #339966; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">💾 Your Word Doc</p>
+      <p style="font-size: 14px; font-weight: 600; color: #339966; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">📩 Delivery status</p>
       <div id="downloadArea">
-        <p style="font-size: 13px; color: #a0a0a0; line-height: 1.6;">Check your email for a link to download your Word document.</p>
+        <p style="font-size: 13px; color: #a0a0a0; line-height: 1.6;">Sending...</p>
       </div>
     </div>
 
@@ -638,7 +645,10 @@
   let currentSection = 1;
 
   window.addEventListener('DOMContentLoaded', () => {
-    });
+    if (CONFIG.EMAILJS_PUBLIC_KEY) {
+      emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
+    }
+  });
 
 
 
@@ -690,6 +700,59 @@
     return Array.from(boxes).map(b => b.value);
   }
 
+  // --- Email helpers (EmailJS) ---
+  function escapeHtml(str) {
+    return String(str || "").replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+  }
+
+  async function blobToBase64(blob) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result || "";
+        // data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,XXXX
+        const base64 = String(dataUrl).split(",")[1] || "";
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function safeFileName(name) {
+    return String(name || "resume")
+      .replace(/[^a-z0-9 _-]/gi, "")
+      .trim()
+      .replace(/\s+/g, "_");
+  }
+
+  async function sendResumeEmailViaEmailJS(data, resumeText, docxBlob) {
+    if (!CONFIG.EMAILJS_PUBLIC_KEY || !CONFIG.EMAILJS_SERVICE_ID || !CONFIG.EMAILJS_TEMPLATE_ID) {
+      throw new Error("EmailJS is not configured. Add your EmailJS keys in the CONFIG section.");
+    }
+
+    const attachmentBase64 = await blobToBase64(docxBlob);
+    const filename = `${safeFileName(data.name)}_4H_Resume.docx`;
+
+    // IMPORTANT (EmailJS template):
+    // 1) Create a template in EmailJS with these variables:
+    //    to_email, to_name, resume_html (or resume_text), attachment, attachment_name
+    // 2) In the template editor, add an attachment and map it to {{attachment}} (base64),
+    //    and set the filename using {{attachment_name}} if your plan supports it.
+    const params = {
+      to_email: data.email,
+      to_name: data.name,
+      resume_html: escapeHtml(resumeText).replace(/\n/g, "<br>"),
+      resume_text: resumeText,
+      attachment: attachmentBase64,
+      attachment_name: filename,
+      from_email: CONFIG.RESUME_FROM_EMAIL || ""
+    };
+
+    return emailjs.send(CONFIG.EMAILJS_SERVICE_ID, CONFIG.EMAILJS_TEMPLATE_ID, params);
+  }
+
+
   async function submitForm() {
     // Show loading
     document.getElementById('s5').classList.remove('active');
@@ -720,13 +783,18 @@
     };
 
     try {
-      const resume = await generateResume(data);
-      const docxBlob = await buildDocxBlob(data, resume);
-      downloadDocx(docxBlob, `${data.name || "resume"}_4H_Resume.docx`);
+      const resumeText = await generateResume(data);
+      const docxBlob = await buildDocxBlob(data, resumeText);
+
+      // ✅ Email the Word doc (no download)
+      await sendResumeEmailViaEmailJS(data, resumeText, docxBlob);
+
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
+      const emailEl = document.getElementById('successEmail');
+      if (emailEl) emailEl.textContent = data.email;
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">Your resume has downloaded as a Word document.</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume (Word doc attached).</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
