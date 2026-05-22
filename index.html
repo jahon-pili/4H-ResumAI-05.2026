@@ -385,9 +385,9 @@
   const CONFIG = {
     // ✅ EmailJS is client-side, so these IDs are OK to keep in the front-end.
     // Get these from EmailJS: https://www.emailjs.com/
-    EMAILJS_PUBLIC_KEY: "REPLACE_WITH_YOUR_EMAILJS_PUBLIC_KEY",
-    EMAILJS_SERVICE_ID: "REPLACE_WITH_YOUR_EMAILJS_SERVICE_ID",
-    EMAILJS_TEMPLATE_ID: "REPLACE_WITH_YOUR_EMAILJS_TEMPLATE_ID",
+    EMAILJS_PUBLIC_KEY: "jKAF1oOwBajtMdLIL",
+    EMAILJS_SERVICE_ID: "service_uolbdhi",
+    EMAILJS_TEMPLATE_ID: "template_1h7n0zg",
 
     // Optional: what you want the "from" email to look like inside the email body/template.
     RESUME_FROM_EMAIL: "jahon@jmp-creative.com"
@@ -815,7 +815,16 @@ function go(n) {
     };
 
     try {
-      await generateResume(data);
+      // 1) Get resume TEXT from the Netlify function (OpenAI only)
+      const genResult = await generateResume(data);
+      const resumeText = genResult.resumeText || genResult.resume || "";
+      if (!resumeText) throw new Error("No resume text was returned.");
+
+      // 2) Build the Word .docx in the browser
+      const docxBlob = await buildDocxBlob(data, resumeText);
+
+      // 3) Upload the docx + send the email with the download link
+      await sendResumeEmailViaEmailJS(data, resumeText, docxBlob);
 
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
