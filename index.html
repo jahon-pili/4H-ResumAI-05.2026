@@ -924,7 +924,7 @@ function go(n) {
       children: [new TextRun({ text: contact, size: 19, color: SOFTGREY })],
       alignment: AlignmentType.CENTER,
       spacing: { after: 240 },
-      border: { bottom: { color: CLOVER, size: 8, style: BorderStyle.SINGLE } }
+      border: { bottom: { color: CLOVER, size: 8, space: 6, style: BorderStyle.SINGLE } }
     }));
 
     // Known section titles (so we catch them whether or not they are ALL CAPS)
@@ -942,7 +942,7 @@ function go(n) {
 
       // Blank line -> small spacer
       if (!trimmed) {
-        docChildren.push(new Paragraph({ spacing: { after: 40 } }));
+        docChildren.push(new Paragraph({ spacing: { after: 20 } }));
         continue;
       }
 
@@ -974,7 +974,7 @@ function go(n) {
             size: 24,
             color: CLOVER
           })],
-          spacing: { before: 240, after: 100 },
+          spacing: { before: 120, after: 60 },
           border: { bottom: { color: RULE, size: 6, style: BorderStyle.SINGLE } }
         }));
         continue;
@@ -986,7 +986,7 @@ function go(n) {
         docChildren.push(new Paragraph({
           children: runsFromMarkdown(bulletText, { size: 21, color: DARKTEXT }),
           bullet: { level: 0 },
-          spacing: { after: 70 }
+          spacing: { after: 40 }
         }));
         continue;
       }
@@ -994,7 +994,7 @@ function go(n) {
       // Normal paragraph
       docChildren.push(new Paragraph({
         children: runsFromMarkdown(trimmed, { size: 21, color: DARKTEXT }),
-        spacing: { after: 90 },
+        spacing: { after: 50 },
         alignment: AlignmentType.LEFT
       }));
     }
