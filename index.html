@@ -624,7 +624,7 @@
   <div class="success-screen" id="successScreen">
     <span class="success-icon">🎉</span>
     <h2>Your resume is ready!</h2>
-    <p>We emailed a Word document to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
+    <p>We emailed your resume to <strong id="successEmail"></strong>. It may take a minute or two to arrive.</p>
     <p style="font-size: 13px; margin-top: -10px;">Don't see it? Check your spam folder.</p>
 
     <div style="margin: 28px auto; max-width: 360px; background: #1a1a1a; border: 1px solid #339966; border-radius: 12px; padding: 24px 20px; text-align: center;">
@@ -785,9 +785,15 @@ function go(n) {
     document.getElementById('loadingScreen').classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
+    const firstName = document.getElementById('firstName').value.trim();
+    const lastName = document.getElementById('lastName').value.trim();
+    const email = document.getElementById('email').value.trim();
+
     const data = {
-      name: `${document.getElementById('firstName').value.trim()} ${document.getElementById('lastName').value.trim()}`,
-      email: document.getElementById('email').value.trim(),
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`.trim(),
+      email,
       city: document.getElementById('city').value.trim(),
       state: document.getElementById('state').value.trim(),
       school: document.getElementById('school').value.trim(),
@@ -809,18 +815,16 @@ function go(n) {
     };
 
     try {
-      const resumeText = await generateResume(data);
-      const docxBlob = await buildDocxBlob(data, resumeText);
-
-      // ✅ Email the Word doc (no download)
-      await sendResumeEmailViaEmailJS(data, resumeText, docxBlob);
+      await generateResume(data);
 
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('successScreen').classList.add('active');
+
       const emailEl = document.getElementById('successEmail');
       if (emailEl) emailEl.textContent = data.email;
+
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume (Word doc attached).</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume.</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
@@ -829,64 +833,29 @@ function go(n) {
   }
 
   async function generateResume(d) {
-    const skillsList = d.skills.concat(d.otherSkills ? [d.otherSkills] : []).join(', ');
-
-    const prompt = `You are a professional resume writer specializing in creating compelling resumes for teenagers with no formal work experience. Your job is to write a complete, personalized resume for a 4-H youth participant.
-
-STUDENT PROFILE:
-- Name: ${d.name}
-- Location: ${d.city}, ${d.state}
-- School: ${d.school}, Grade: ${d.grade}
-- Resume Purpose: ${d.resumeUse}
-- Desired Tone: ${d.tone}
-- Career Interests: ${d.interests || "Not specified"}
-
-THEIR ACTIVITIES:
-- 4-H Projects/Clubs: ${d.fourH || "Not specified"}
-- School Activities: ${d.schoolActs || "Not specified"}  
-- Volunteer/Community Work: ${d.volunteer || "Not specified"}
-- Home Responsibilities: ${d.homeResp || "Not specified"}
-
-THEIR SKILLS: ${skillsList || "Not listed"}
-
-THEIR 4-H STORY:
-- Proudest accomplishment: ${d.proud || "Not provided"}
-- Leadership example: ${d.leadership || "Not provided"}
-- How they've grown: ${d.growth || "Not provided"}
-- What "making the best better" means to them: ${d.motto || "Not provided"}
-
-SPECIAL HIGHLIGHT REQUEST: ${d.highlight || "None"}
-
-INSTRUCTIONS:
-1. Write a complete professional resume in plain text (no markdown, no asterisks, no special formatting characters)
-2. Use action verbs and specific, achievement-oriented language
-3. Transform their activities and responsibilities into impressive resume bullets
-4. The objective/summary must be completely unique to this student's specific story, goals, and personality
-5. Include these sections: OBJECTIVE, EDUCATION, 4-H EXPERIENCE & PROJECTS, ACTIVITIES & LEADERSHIP, SKILLS, COMMUNITY SERVICE
-6. Write 2-4 bullet points per section using strong action verbs
-7. Make it sound like this specific student, not a generic teen
-8. Keep total length to about 1 page (350-500 words)
-9. Use plain text formatting: section headers in ALL CAPS, bullets as dashes (-)
-
-Write the complete resume now:`;
-
     const response = await fetch("/.netlify/functions/generateResume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({
+        email: d.email,
+        studentEmail: d.email,
+        firstName: d.firstName,
+        lastName: d.lastName,
+        name: d.name,
+        answers: d
+      })
     });
 
-    if (!response.ok) {
-      let errText = "Resume generation failed. Please try again.";
-      try {
-        const err = await response.json();
-        errText = err.error || err.message || errText;
-      } catch {}
-      throw new Error(errText);
+    let result = {};
+    try {
+      result = await response.json();
+    } catch {}
+
+    if (!response.ok || result.success === false) {
+      throw new Error(result.error || result.message || result.details || "Resume generation or email failed. Please try again.");
     }
 
-    const result = await response.json();
-    return result.resumeText || result.text || result.output || "";
+    return result;
   }
 
   async function buildDocxBlob(d, resumeText) {
