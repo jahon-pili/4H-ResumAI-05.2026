@@ -1,132 +1,160 @@
-// netlify/functions/generateResume.js
-// Anthropic Claude API call with retry/backoff for overload/rate-limit.
-// Model updated: use env var ANTHROPIC_MODEL or default to "claude-sonnet-4-6".
-
-exports.handler = async (event) => {
+exports.handler = async function (event) {
   try {
     if (event.httpMethod !== "POST") {
-      return {
-        statusCode: 405,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Method not allowed" }),
-      };
+      return response(405, { error: "Method not allowed" });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return {
-        statusCode: 500,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Missing ANTHROPIC_API_KEY" }),
-      };
+    const body = JSON.parse(event.body || "{}");
+
+    const {
+      email,
+      firstName,
+      lastName,
+      answers
+    } = body;
+
+    if (!email) {
+      return response(400, { error: "Student email is required." });
     }
 
-    const { prompt } = JSON.parse(event.body || "{}");
-    if (!prompt || typeof prompt !== "string") {
-      return {
-        statusCode: 400,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Missing prompt" }),
-      };
+    if (!process.env.OPENAI_API_KEY) {
+      return response(500, { error: "Missing OPENAI_API_KEY in Netlify." });
     }
 
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
-    const maxAttempts = 5;
-
-    let lastStatus = 500;
-    let lastMsg = "Unknown error";
-    let data = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 1100,
-          temperature: 0.5,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      lastStatus = r.status;
-
-      const raw = await r.text();
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = { raw };
-      }
-
-      if (r.ok) {
-        const resumeText = Array.isArray(data?.content)
-          ? data.content
-              .filter((b) => b?.type === "text")
-              .map((b) => b.text)
-              .join("\n")
-          : "";
-
-        if (!resumeText) {
-          return {
-            statusCode: 502,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              error: "Anthropic returned no text content",
-              details: data,
-            }),
-          };
-        }
-
-        return {
-          statusCode: 200,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ resumeText }),
-        };
-      }
-
-      const msg =
-        data?.error?.message ||
-        data?.message ||
-        data?.raw ||
-        `Anthropic API error (status ${r.status})`;
-
-      lastMsg = msg;
-
-      const retryable =
-        r.status === 429 || // rate limit
-        r.status === 503 || // service unavailable
-        r.status === 529 || // overloaded
-        /overload|overloaded|temporarily|try again|busy/i.test(String(msg));
-
-      if (!retryable || attempt === maxAttempts) {
-        return {
-          statusCode: r.status,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ error: msg }),
-        };
-      }
-
-      const backoff =
-        Math.min(9000, 600 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 300);
-      await sleep(backoff);
+    if (!process.env.RESEND_API_KEY) {
+      return response(500, { error: "Missing RESEND_API_KEY in Netlify." });
     }
 
-    return {
-      statusCode: lastStatus,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: lastMsg }),
-    };
-  } catch (e) {
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: e?.message || "Server error" }),
-    };
+    const studentName = `${firstName || ""} ${lastName || ""}`.trim() || "Student";
+
+    const resumeText = await createResumeWithAI(studentName, answers);
+
+    await emailResume({
+      to: email,
+      studentName,
+      resumeText
+    });
+
+    return response(200, {
+      success: true,
+      message: "Resume emailed successfully."
+    });
+
+  } catch (error) {
+    console.error("generateResume error:", error);
+    return response(500, {
+      error: "Resume could not be generated or emailed.",
+      details: error.message
+    });
   }
 };
+
+async function createResumeWithAI(studentName, answers) {
+  const prompt = `
+Create a polished, age-appropriate resume for a middle school or high school 4-H student.
+
+Student name:
+${studentName}
+
+Student answers:
+${JSON.stringify(answers, null, 2)}
+
+Make it professional, honest, encouraging, and suitable for school, jobs, internships, scholarships, 4-H opportunities, and community programs.
+
+Use clear sections:
+- Name
+- Summary
+- Skills
+- 4-H Experience
+- Leadership
+- Community Service
+- Education
+- Awards / Achievements
+- Activities
+`;
+
+  const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You write clean, age-appropriate resumes for 4-H middle school and high school students."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.4
+    })
+  });
+
+  if (!aiRes.ok) {
+    const errorText = await aiRes.text();
+    throw new Error(`OpenAI error: ${errorText}`);
+  }
+
+  const aiData = await aiRes.json();
+  return aiData.choices?.[0]?.message?.content || "";
+}
+
+async function emailResume({ to, studentName, resumeText }) {
+  const safeFileName = `${studentName.replace(/[^a-z0-9]/gi, "_")}_Resume.txt`;
+
+  const emailRes = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: "4-H ResumAI Builder <onboarding@resend.dev>",
+      to: [to],
+      subject: "Your 4-H Resume",
+      html: `
+        <p>Hello ${escapeHtml(studentName)},</p>
+        <p>Your 4-H resume is attached.</p>
+        <p>Great job taking this step toward your future!</p>
+      `,
+      attachments: [
+        {
+          filename: safeFileName,
+          content: Buffer.from(resumeText, "utf8").toString("base64")
+        }
+      ]
+    })
+  });
+
+  if (!emailRes.ok) {
+    const errorText = await emailRes.text();
+    throw new Error(`Email error: ${errorText}`);
+  }
+
+  return emailRes.json();
+}
+
+function response(statusCode, body) {
+  return {
+    statusCode,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    },
+    body: JSON.stringify(body)
+  };
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
