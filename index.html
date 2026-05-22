@@ -706,7 +706,7 @@
   }
 
   async function blobToBase64(blob) {
-    return await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result || "";
@@ -731,29 +731,21 @@
       throw new Error("EmailJS is not configured. Add your EmailJS keys in the CONFIG section.");
     }
 
-    // 1) Upload DOCX to Filestack via Netlify Function (keeps Filestack key out of the browser)
+    const attachmentBase64 = await blobToBase64(docxBlob);
     const filename = `${safeFileName(data.name)}_4H_Resume.docx`;
-    const docxBase64 = await blobToBase64(docxBlob);
 
-    const upResp = await fetch("/.netlify/functions/uploadDocx", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, docxBase64 })
-    });
-
-    const upData = await upResp.json().catch(() => ({}));
-    if (!upResp.ok || !upData.url) {
-      throw new Error(upData?.error || "Could not upload the Word doc.");
-    }
-
-    const resumeLink = upData.url;
-
-    // 2) Send EmailJS email with resume text + download link (NO attachment)
+    // IMPORTANT (EmailJS template):
+    // 1) Create a template in EmailJS with these variables:
+    //    to_email, to_name, resume_html (or resume_text), attachment, attachment_name
+    // 2) In the template editor, add an attachment and map it to {{attachment}} (base64),
+    //    and set the filename using {{attachment_name}} if your plan supports it.
     const params = {
       to_email: data.email,
       to_name: data.name,
-      resume_content: resumeText,
-      resume_link: resumeLink,
+      resume_html: escapeHtml(resumeText).replace(/\n/g, "<br>"),
+      resume_text: resumeText,
+      attachment: attachmentBase64,
+      attachment_name: filename,
       from_email: CONFIG.RESUME_FROM_EMAIL || ""
     };
 
@@ -794,7 +786,7 @@
       const resumeText = await generateResume(data);
       const docxBlob = await buildDocxBlob(data, resumeText);
 
-      // ✅ Email a download link (Word doc hosted on Filestack)
+      // ✅ Email the Word doc (no download)
       await sendResumeEmailViaEmailJS(data, resumeText, docxBlob);
 
       document.getElementById('loadingScreen').classList.remove('active');
@@ -802,7 +794,7 @@
       const emailEl = document.getElementById('successEmail');
       if (emailEl) emailEl.textContent = data.email;
       document.getElementById('downloadArea').innerHTML =
-        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume download link.</p>';
+        '<p style="font-size:13px;color:#a0a0a0;line-height:1.5;">✅ Sent! Check your email for your resume (Word doc attached).</p>';
     } catch (err) {
       document.getElementById('loadingScreen').classList.remove('active');
       document.getElementById('s5').classList.add('active');
