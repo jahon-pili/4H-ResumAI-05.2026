@@ -47,25 +47,12 @@ Student Information:
 ${JSON.stringify(formData, null, 2)}
 
 Requirements:
-
-HONESTY (most important):
-- Do NOT invent jobs, awards, schools, achievements, titles, dates, or numbers.
-- Do NOT add accomplishments the student did not state.
-- If an answer is a joke, unclear, or not resume-appropriate, leave it out entirely rather than dressing it up.
-- Every fact in the resume must trace directly back to something the student actually wrote.
-
-ELABORATION (what you SHOULD do):
-- Take the student's real answers and express them in more polished, articulate, academic language.
-- Elaborate on HOW they describe an experience, not WHAT happened. Improve the wording, not the facts.
-- For each genuine experience, you may add one short sentence describing the transferable skills it builds
-  (e.g. responsibility, communication, teamwork) ONLY when that skill clearly follows from what they wrote.
-- Use strong, professional action verbs (developed, contributed, collaborated, organized, demonstrated).
-- Write in a confident, capable, age-appropriate voice suitable for a motivated student.
-
-FORMAT:
-- Make it professional but warm and age-appropriate, not corporate or stiff.
-- Format it clearly as a resume with section titles each on their own line.
-- Include these sections when information is available:
+- Make it professional but age-appropriate.
+- Do not invent jobs, awards, schools, or achievements.
+- Use the student's answers only.
+- Make the student sound confident, capable, and honest.
+- Format it clearly as a resume.
+- Include useful sections when information is available:
   Name
   Summary
   Skills
@@ -75,7 +62,6 @@ FORMAT:
   Education
   Awards / Achievements
   Activities
-  Interests
 `;
 
   const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
