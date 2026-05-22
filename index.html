@@ -868,57 +868,142 @@ function go(n) {
   }
 
   async function buildDocxBlob(d, resumeText) {
-    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle } = docx;
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle } = docx;
+
+    // Brand colors
+    const CLOVER = '339966';
+    const DARKTEXT = '2E2E2E';
+    const SOFTGREY = '707070';
+    const RULE = 'D9E5DE';
+
+    // Turn a string containing **bold** markers into an array of TextRuns.
+    function runsFromMarkdown(text, baseOpts) {
+      const opts = baseOpts || {};
+      const parts = String(text).split(/(\*\*[^*]+\*\*)/g).filter(s => s !== '');
+      if (parts.length === 0) {
+        return [new TextRun(Object.assign({ text: '' }, opts))];
+      }
+      return parts.map(part => {
+        const m = part.match(/^\*\*([^*]+)\*\*$/);
+        if (m) {
+          return new TextRun(Object.assign({}, opts, { text: m[1], bold: true }));
+        }
+        return new TextRun(Object.assign({}, opts, { text: part }));
+      });
+    }
+
+    // Strip any leftover markdown markers from a plain string.
+    function clean(text) {
+      return String(text).replace(/\*\*/g, '').replace(/^#+\s*/, '').trim();
+    }
+
+    // Is this line a markdown divider like ---, ***, - -- ?
+    function isDivider(line) {
+      const t = line.replace(/[\s]/g, '');
+      return t.length >= 2 && /^[-*_]+$/.test(t);
+    }
 
     const lines = resumeText.split('\n');
     const docChildren = [];
 
-    // Header block with name and contact
+    // --- Header: name ---
     docChildren.push(new Paragraph({
-      children: [new TextRun({ text: d.name.toUpperCase(), bold: true, size: 36, color: '339966' })],
+      children: [new TextRun({ text: d.name.toUpperCase(), bold: true, size: 40, color: CLOVER })],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 80 }
+      spacing: { after: 40 }
     }));
 
-    const contact = [d.city && d.state ? d.city + ', ' + d.state : '', d.email, d.school + (d.grade ? ' | Grade ' + d.grade : '')].filter(Boolean).join('  |  ');
+    // --- Header: contact line ---
+    const contact = [
+      (d.city && d.state) ? d.city + ', ' + d.state : (d.city || d.state || ''),
+      d.email,
+      d.school ? d.school + (d.grade ? ' | Grade ' + d.grade : '') : ''
+    ].filter(Boolean).join('   \u2022   ');
+
     docChildren.push(new Paragraph({
-      children: [new TextRun({ text: contact, size: 20, color: '666666' })],
+      children: [new TextRun({ text: contact, size: 19, color: SOFTGREY })],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-      border: { bottom: { color: '339966', size: 6, style: BorderStyle.SINGLE } }
+      spacing: { after: 240 },
+      border: { bottom: { color: CLOVER, size: 8, style: BorderStyle.SINGLE } }
     }));
 
-    // Parse resume lines
-    for (const line of lines) {
-      const trimmed = line.trim();
+    // Known section titles (so we catch them whether or not they are ALL CAPS)
+    const SECTIONS = [
+      'summary', 'skills', '4-h experience', 'leadership', 'community service',
+      'education', 'awards / achievements', 'awards', 'achievements',
+      'activities', 'interests', 'motto', 'objective'
+    ];
+
+    let skippedDuplicateName = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+
+      // Blank line -> small spacer
       if (!trimmed) {
-        docChildren.push(new Paragraph({ spacing: { after: 60 } }));
+        docChildren.push(new Paragraph({ spacing: { after: 40 } }));
         continue;
       }
-      // Section headers (ALL CAPS lines)
-      if (trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.startsWith('-')) {
-        docChildren.push(new Paragraph({
-          children: [new TextRun({ text: trimmed, bold: true, size: 24, color: '339966', allCaps: true })],
-          spacing: { before: 200, after: 80 },
-          border: { bottom: { color: 'CCCCCC', size: 2, style: BorderStyle.SINGLE } }
-        }));
-      } else if (trimmed.startsWith('-')) {
-        // Bullet points
-        docChildren.push(new Paragraph({
-          children: [new TextRun({ text: trimmed.substring(1).trim(), size: 20 })],
-          bullet: { level: 0 },
-          spacing: { after: 60 }
-        }));
-      } else {
-        docChildren.push(new Paragraph({
-          children: [new TextRun({ text: trimmed, size: 20 })],
-          spacing: { after: 60 }
-        }));
+
+      // Skip divider lines entirely
+      if (isDivider(trimmed)) continue;
+
+      const bare = clean(trimmed).toLowerCase();
+
+      // Skip a duplicate name line near the top (OpenAI sometimes repeats it)
+      if (!skippedDuplicateName && bare === String(d.name).toLowerCase()) {
+        skippedDuplicateName = true;
+        continue;
       }
+      // Skip a stray "Email: ..." line in the header area
+      if (i < 8 && /^email:/i.test(trimmed)) continue;
+      // Skip a stray standalone city/state line in the header area
+      if (i < 8 && bare === String((d.city || '') + ', ' + (d.state || '')).toLowerCase()) continue;
+
+      // Section header? (matches known titles, or is short + bold-wrapped)
+      const isKnownSection = SECTIONS.indexOf(bare) !== -1;
+      const isBoldHeader = /^\*\*[^*]+\*\*$/.test(trimmed) && bare.length < 40;
+      const isCapsHeader = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.startsWith('-');
+
+      if (isKnownSection || isBoldHeader || isCapsHeader) {
+        docChildren.push(new Paragraph({
+          children: [new TextRun({
+            text: clean(trimmed).toUpperCase(),
+            bold: true,
+            size: 24,
+            color: CLOVER
+          })],
+          spacing: { before: 240, after: 100 },
+          border: { bottom: { color: RULE, size: 6, style: BorderStyle.SINGLE } }
+        }));
+        continue;
+      }
+
+      // Bullet point
+      if (trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('\u2022')) {
+        const bulletText = trimmed.replace(/^[-*\u2022]+\s*/, '');
+        docChildren.push(new Paragraph({
+          children: runsFromMarkdown(bulletText, { size: 21, color: DARKTEXT }),
+          bullet: { level: 0 },
+          spacing: { after: 70 }
+        }));
+        continue;
+      }
+
+      // Normal paragraph
+      docChildren.push(new Paragraph({
+        children: runsFromMarkdown(trimmed, { size: 21, color: DARKTEXT }),
+        spacing: { after: 90 },
+        alignment: AlignmentType.LEFT
+      }));
     }
 
     const doc = new Document({
-      sections: [{ properties: { page: { margin: { top: 720, bottom: 720, left: 900, right: 900 } } }, children: docChildren }]
+      sections: [{
+        properties: { page: { margin: { top: 850, bottom: 850, left: 1000, right: 1000 } } },
+        children: docChildren
+      }]
     });
 
     const blob = await Packer.toBlob(doc);
