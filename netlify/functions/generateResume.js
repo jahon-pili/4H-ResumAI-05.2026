@@ -19,28 +19,18 @@ exports.handler = async function (event) {
       return jsonResponse(500, { error: "Missing OPENAI_API_KEY in Netlify." });
     }
 
-    if (!process.env.RESEND_API_KEY) {
-      return jsonResponse(500, { error: "Missing RESEND_API_KEY in Netlify." });
-    }
-
     const resumeText = await generateResumeText(studentName, body);
-
-    await sendResumeEmail({
-      to: email,
-      studentName,
-      resumeText
-    });
 
     return jsonResponse(200, {
       success: true,
-      message: "Your resume has been emailed successfully."
+      resumeText: resumeText
     });
   } catch (error) {
     console.error("generateResume.js error:", error);
 
     return jsonResponse(500, {
       success: false,
-      error: "Resume could not be generated or emailed.",
+      error: "Resume could not be generated.",
       details: error.message
     });
   }
@@ -112,44 +102,6 @@ Requirements:
   return resumeText;
 }
 
-async function sendResumeEmail({ to, studentName, resumeText }) {
-  const fromEmail =
-    process.env.RESUME_FROM_EMAIL || "4-H ResumAI Builder <onboarding@resend.dev>";
-
-  const safeFileName = `${studentName.replace(/[^a-z0-9]/gi, "_")}_Resume.txt`;
-
-  const resendResponse = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [to],
-      subject: "Your 4-H Resume",
-      html: `
-        <p>Hello ${escapeHtml(studentName)},</p>
-        <p>Your 4-H resume is attached to this email.</p>
-        <p>Great job taking this step toward your future.</p>
-      `,
-      attachments: [
-        {
-          filename: safeFileName,
-          content: Buffer.from(resumeText, "utf8").toString("base64")
-        }
-      ]
-    })
-  });
-
-  if (!resendResponse.ok) {
-    const errorText = await resendResponse.text();
-    throw new Error(`Resend email error: ${errorText}`);
-  }
-
-  return resendResponse.json();
-}
-
 function jsonResponse(statusCode, body) {
   return {
     statusCode,
@@ -159,13 +111,4 @@ function jsonResponse(statusCode, body) {
     },
     body: JSON.stringify(body)
   };
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
